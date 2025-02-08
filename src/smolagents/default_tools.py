@@ -16,15 +16,15 @@
 # limitations under the License.
 import re
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
+from .agent_types import AgentAudio
 from .local_python_executor import (
     BASE_BUILTIN_MODULES,
     BASE_PYTHON_TOOLS,
     evaluate_python_code,
 )
 from .tools import PipelineTool, Tool
-from .types import AgentAudio
 
 
 @dataclass
@@ -76,7 +76,7 @@ class PythonInterpreterTool(Tool):
                 authorized_imports=self.authorized_imports,
             )[0]  # The second element is boolean is_final_answer
         )
-        return f"Stdout:\n{state['print_outputs']}\nOutput: {output}"
+        return f"Stdout:\n{str(state['_print_outputs'])}\nOutput: {output}"
 
 
 class FinalAnswerTool(Tool):
@@ -85,7 +85,7 @@ class FinalAnswerTool(Tool):
     inputs = {"answer": {"type": "any", "description": "The final answer to the problem"}}
     output_type = "any"
 
-    def forward(self, answer):
+    def forward(self, answer: Any) -> Any:
         return answer
 
 
@@ -106,8 +106,8 @@ class DuckDuckGoSearchTool(Tool):
     inputs = {"query": {"type": "string", "description": "The search query to perform."}}
     output_type = "string"
 
-    def __init__(self, *args, max_results=10, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, max_results=10, **kwargs):
+        super().__init__()
         self.max_results = max_results
         try:
             from duckduckgo_search import DDGS
@@ -115,7 +115,7 @@ class DuckDuckGoSearchTool(Tool):
             raise ImportError(
                 "You must install package `duckduckgo_search` to run this tool: for instance run `pip install duckduckgo-search`."
             ) from e
-        self.ddgs = DDGS()
+        self.ddgs = DDGS(**kwargs)
 
     def forward(self, query: str) -> str:
         results = self.ddgs.text(query, max_results=self.max_results)
@@ -169,10 +169,10 @@ class GoogleSearchTool(Tool):
         if "organic_results" not in results.keys():
             if filter_year is not None:
                 raise Exception(
-                    f"'organic_results' key not found for query: '{query}' with filtering on year={filter_year}. Use a less restrictive query or do not filter on year."
+                    f"No results found for query: '{query}' with filtering on year={filter_year}. Use a less restrictive query or do not filter on year."
                 )
             else:
-                raise Exception(f"'organic_results' key not found for query: '{query}'. Use a less restrictive query.")
+                raise Exception(f"No results found for query: '{query}'. Use a less restrictive query.")
         if len(results["organic_results"]) == 0:
             year_filter_message = f" with filter year={filter_year}" if filter_year is not None else ""
             return f"No results found for '{query}'{year_filter_message}. Try with a more general query, or remove the year filter."
@@ -225,8 +225,8 @@ class VisitWebpageTool(Tool):
                 "You must install packages `markdownify` and `requests` to run this tool: for instance run `pip install markdownify requests`."
             ) from e
         try:
-            # Send a GET request to the URL
-            response = requests.get(url)
+            # Send a GET request to the URL with a 20-second timeout
+            response = requests.get(url, timeout=20)
             response.raise_for_status()  # Raise an exception for bad status codes
 
             # Convert the HTML content to Markdown
@@ -237,6 +237,8 @@ class VisitWebpageTool(Tool):
 
             return truncate_content(markdown_content, 10000)
 
+        except requests.exceptions.Timeout:
+            return "The request timed out. Please try again later or check the URL."
         except RequestException as e:
             return f"Error fetching the webpage: {str(e)}"
         except Exception as e:
@@ -255,17 +257,15 @@ class SpeechToTextTool(PipelineTool):
     }
     output_type = "string"
 
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
         from transformers.models.whisper import (
             WhisperForConditionalGeneration,
             WhisperProcessor,
         )
 
-        if not hasattr(cls, "pre_processor_class"):
-            cls.pre_processor_class = WhisperProcessor
-        if not hasattr(cls, "model_class"):
-            cls.model_class = WhisperForConditionalGeneration
-        return super().__new__()
+        cls.pre_processor_class = WhisperProcessor
+        cls.model_class = WhisperForConditionalGeneration
+        return super().__new__(cls, *args, **kwargs)
 
     def encode(self, audio):
         audio = AgentAudio(audio).to_raw()

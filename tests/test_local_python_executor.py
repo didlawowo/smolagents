@@ -13,7 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import types
 import unittest
+from textwrap import dedent
 
 import numpy as np
 import pytest
@@ -21,8 +23,10 @@ import pytest
 from smolagents.default_tools import BASE_PYTHON_TOOLS
 from smolagents.local_python_executor import (
     InterpreterError,
+    PrintContainer,
     evaluate_python_code,
     fix_final_answer_code,
+    get_safe_module,
 )
 
 
@@ -32,19 +36,25 @@ def add_two(x):
 
 
 class PythonInterpreterTester(unittest.TestCase):
+    def assertDictEqualNoPrint(self, dict1, dict2):
+        return self.assertDictEqual(
+            {k: v for k, v in dict1.items() if k != "_print_outputs"},
+            {k: v for k, v in dict2.items() if k != "_print_outputs"},
+        )
+
     def test_evaluate_assign(self):
         code = "x = 3"
         state = {}
         result, _ = evaluate_python_code(code, {}, state=state)
         assert result == 3
-        self.assertDictEqual(state, {"x": 3, "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 3, "_operations_count": 2})
 
         code = "x = y"
         state = {"y": 5}
         result, _ = evaluate_python_code(code, {}, state=state)
         # evaluate returns the value of the last assignment.
         assert result == 5
-        self.assertDictEqual(state, {"x": 5, "y": 5, "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 5, "y": 5, "_operations_count": 2})
 
         code = "a=1;b=None"
         result, _ = evaluate_python_code(code, {}, state={})
@@ -70,7 +80,7 @@ class PythonInterpreterTester(unittest.TestCase):
         state = {"x": 3}
         result, _ = evaluate_python_code(code, {"add_two": add_two}, state=state)
         assert result == 5
-        self.assertDictEqual(state, {"x": 3, "y": 5, "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 3, "y": 5, "_operations_count": 3})
 
         # Should not work without the tool
         with pytest.raises(InterpreterError) as e:
@@ -82,14 +92,14 @@ class PythonInterpreterTester(unittest.TestCase):
         state = {}
         result, _ = evaluate_python_code(code, {}, state=state)
         assert result == 3
-        self.assertDictEqual(state, {"x": 3, "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 3, "_operations_count": 2})
 
     def test_evaluate_dict(self):
         code = "test_dict = {'x': x, 'y': add_two(x)}"
         state = {"x": 3}
         result, _ = evaluate_python_code(code, {"add_two": add_two}, state=state)
         self.assertDictEqual(result, {"x": 3, "y": 5})
-        self.assertDictEqual(state, {"x": 3, "test_dict": {"x": 3, "y": 5}, "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 3, "test_dict": {"x": 3, "y": 5}, "_operations_count": 7})
 
     def test_evaluate_expression(self):
         code = "x = 3\ny = 5"
@@ -97,7 +107,7 @@ class PythonInterpreterTester(unittest.TestCase):
         result, _ = evaluate_python_code(code, {}, state=state)
         # evaluate returns the value of the last assignment.
         assert result == 5
-        self.assertDictEqual(state, {"x": 3, "y": 5, "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 3, "y": 5, "_operations_count": 4})
 
     def test_evaluate_f_string(self):
         code = "text = f'This is x: {x}.'"
@@ -105,7 +115,7 @@ class PythonInterpreterTester(unittest.TestCase):
         result, _ = evaluate_python_code(code, {}, state=state)
         # evaluate returns the value of the last assignment.
         assert result == "This is x: 3."
-        self.assertDictEqual(state, {"x": 3, "text": "This is x: 3.", "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 3, "text": "This is x: 3.", "_operations_count": 6})
 
     def test_evaluate_if(self):
         code = "if x <= 3:\n    y = 2\nelse:\n    y = 5"
@@ -113,40 +123,40 @@ class PythonInterpreterTester(unittest.TestCase):
         result, _ = evaluate_python_code(code, {}, state=state)
         # evaluate returns the value of the last assignment.
         assert result == 2
-        self.assertDictEqual(state, {"x": 3, "y": 2, "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 3, "y": 2, "_operations_count": 6})
 
         state = {"x": 8}
         result, _ = evaluate_python_code(code, {}, state=state)
         # evaluate returns the value of the last assignment.
         assert result == 5
-        self.assertDictEqual(state, {"x": 8, "y": 5, "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 8, "y": 5, "_operations_count": 6})
 
     def test_evaluate_list(self):
         code = "test_list = [x, add_two(x)]"
         state = {"x": 3}
         result, _ = evaluate_python_code(code, {"add_two": add_two}, state=state)
         self.assertListEqual(result, [3, 5])
-        self.assertDictEqual(state, {"x": 3, "test_list": [3, 5], "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 3, "test_list": [3, 5], "_operations_count": 5})
 
     def test_evaluate_name(self):
         code = "y = x"
         state = {"x": 3}
         result, _ = evaluate_python_code(code, {}, state=state)
         assert result == 3
-        self.assertDictEqual(state, {"x": 3, "y": 3, "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 3, "y": 3, "_operations_count": 2})
 
     def test_evaluate_subscript(self):
         code = "test_list = [x, add_two(x)]\ntest_list[1]"
         state = {"x": 3}
         result, _ = evaluate_python_code(code, {"add_two": add_two}, state=state)
         assert result == 5
-        self.assertDictEqual(state, {"x": 3, "test_list": [3, 5], "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 3, "test_list": [3, 5], "_operations_count": 9})
 
         code = "test_dict = {'x': x, 'y': add_two(x)}\ntest_dict['y']"
         state = {"x": 3}
         result, _ = evaluate_python_code(code, {"add_two": add_two}, state=state)
         assert result == 5
-        self.assertDictEqual(state, {"x": 3, "test_dict": {"x": 3, "y": 5}, "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 3, "test_dict": {"x": 3, "y": 5}, "_operations_count": 11})
 
         code = "vendor = {'revenue': 31000, 'rent': 50312}; vendor['ratio'] = round(vendor['revenue'] / vendor['rent'], 2)"
         state = {}
@@ -170,14 +180,14 @@ for result in search_results:
         state = {}
         result, _ = evaluate_python_code(code, {"range": range}, state=state)
         assert result == 2
-        self.assertDictEqual(state, {"x": 2, "i": 2, "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 2, "i": 2, "_operations_count": 11})
 
     def test_evaluate_binop(self):
         code = "y + x"
         state = {"x": 3, "y": 6}
         result, _ = evaluate_python_code(code, {}, state=state)
         assert result == 9
-        self.assertDictEqual(state, {"x": 3, "y": 6, "print_outputs": ""})
+        self.assertDictEqualNoPrint(state, {"x": 3, "y": 6, "_operations_count": 4})
 
     def test_recursive_function(self):
         code = """
@@ -374,7 +384,7 @@ if char.isalpha():
     print('2')"""
         state = {}
         evaluate_python_code(code, BASE_PYTHON_TOOLS, state=state)
-        assert state["print_outputs"] == "2\n"
+        assert state["_print_outputs"].value == "2\n"
 
     def test_imports(self):
         code = "import math\nmath.sqrt(4)"
@@ -453,9 +463,9 @@ if char.isalpha():
         state = {}
         result, _ = evaluate_python_code(code, BASE_PYTHON_TOOLS, state=state)
         assert result is None
-        assert state["print_outputs"] == "Hello world!\nOk no one cares\n"
+        assert state["_print_outputs"].value == "Hello world!\nOk no one cares\n"
 
-        # test print in function
+        # Test print in function (state copy)
         code = """
 print("1")
 def function():
@@ -463,7 +473,17 @@ def function():
 function()"""
         state = {}
         evaluate_python_code(code, {"print": print}, state=state)
-        assert state["print_outputs"] == "1\n2\n"
+        assert state["_print_outputs"].value == "1\n2\n"
+
+        # Test print in list comprehension (state copy)
+        code = """
+print("1")
+def function():
+    print("2")
+[function() for i in range(10)]"""
+        state = {}
+        evaluate_python_code(code, {"print": print, "range": range}, state=state)
+        assert state["_print_outputs"].value == "1\n2\n2\n2\n2\n2\n2\n2\n2\n2\n2\n"
 
     def test_tuple_target_in_iterator(self):
         code = "for a, b in [('Ralf Weikert', 'Austria'), ('Samuel Seungwon Lee', 'South Korea')]:res = a.split()[0]"
@@ -585,7 +605,7 @@ except ValueError as e:
         code = "print(min([1, 2, 3]))"
         state = {}
         evaluate_python_code(code, {"min": min, "print": print}, state=state)
-        assert state["print_outputs"] == "1\n"
+        assert state["_print_outputs"].value == "1\n"
 
     def test_types_as_objects(self):
         code = "type_a = float(2); type_b = str; type_c = int"
@@ -916,9 +936,7 @@ shift_intervals
         code = 'capitals = {"Czech Republic": "Prague", "Monaco": "Monaco", "Bhutan": "Thimphu"};capitals["Butan"]'
         with pytest.raises(Exception) as e:
             evaluate_python_code(code)
-        assert "Maybe you meant one of these indexes instead" in str(
-            e
-        ) and "['Bhutan']" in str(e).replace("\\", "")
+        assert "Maybe you meant one of these indexes instead" in str(e) and "['Bhutan']" in str(e).replace("\\", "")
 
     def test_dangerous_builtins_calls_are_blocked(self):
         unsafe_code = "import os"
@@ -950,3 +968,174 @@ texec(tcompile("1 + 1", "no filename", "exec"))
         evaluate_python_code(
             dangerous_code, static_tools={"tcompile": compile, "teval": eval, "texec": exec} | BASE_PYTHON_TOOLS
         )
+
+    def test_can_import_os_if_explicitly_authorized(self):
+        dangerous_code = "import os; os.listdir('./')"
+        evaluate_python_code(dangerous_code, authorized_imports=["os"])
+
+
+@pytest.mark.parametrize(
+    "code, expected_result",
+    [
+        (
+            dedent("""\
+                x = 1
+                x += 2
+            """),
+            3,
+        ),
+        (
+            dedent("""\
+                x = "a"
+                x += "b"
+            """),
+            "ab",
+        ),
+        (
+            dedent("""\
+                class Custom:
+                    def __init__(self, value):
+                        self.value = value
+                    def __iadd__(self, other):
+                        self.value += other * 10
+                        return self
+
+                x = Custom(1)
+                x += 2
+                x.value
+            """),
+            21,
+        ),
+    ],
+)
+def test_evaluate_augassign(code, expected_result):
+    state = {}
+    result, _ = evaluate_python_code(code, {}, state=state)
+    assert result == expected_result
+
+
+@pytest.mark.parametrize(
+    "operator, expected_result",
+    [
+        ("+=", 7),
+        ("-=", 3),
+        ("*=", 10),
+        ("/=", 2.5),
+        ("//=", 2),
+        ("%=", 1),
+        ("**=", 25),
+        ("&=", 0),
+        ("|=", 7),
+        ("^=", 7),
+        (">>=", 1),
+        ("<<=", 20),
+    ],
+)
+def test_evaluate_augassign_number(operator, expected_result):
+    code = dedent("""\
+        x = 5
+        x {operator} 2
+    """).format(operator=operator)
+    state = {}
+    result, _ = evaluate_python_code(code, {}, state=state)
+    assert result == expected_result
+
+
+@pytest.mark.parametrize(
+    "operator, expected_result",
+    [
+        ("+=", 7),
+        ("-=", 3),
+        ("*=", 10),
+        ("/=", 2.5),
+        ("//=", 2),
+        ("%=", 1),
+        ("**=", 25),
+        ("&=", 0),
+        ("|=", 7),
+        ("^=", 7),
+        (">>=", 1),
+        ("<<=", 20),
+    ],
+)
+def test_evaluate_augassign_custom(operator, expected_result):
+    operator_names = {
+        "+=": "iadd",
+        "-=": "isub",
+        "*=": "imul",
+        "/=": "itruediv",
+        "//=": "ifloordiv",
+        "%=": "imod",
+        "**=": "ipow",
+        "&=": "iand",
+        "|=": "ior",
+        "^=": "ixor",
+        ">>=": "irshift",
+        "<<=": "ilshift",
+    }
+    code = dedent("""\
+        class Custom:
+            def __init__(self, value):
+                self.value = value
+            def __{operator_name}__(self, other):
+                self.value {operator} other
+                return self
+
+        x = Custom(5)
+        x {operator} 2
+        x.value
+    """).format(operator=operator, operator_name=operator_names[operator])
+    state = {}
+    result, _ = evaluate_python_code(code, {}, state=state)
+    assert result == expected_result
+
+
+def test_get_safe_module_handle_lazy_imports():
+    class FakeModule(types.ModuleType):
+        def __init__(self, name):
+            super().__init__(name)
+            self.non_lazy_attribute = "ok"
+
+        def __getattr__(self, name):
+            if name == "lazy_attribute":
+                raise ImportError("lazy import failure")
+            return super().__getattr__(name)
+
+        def __dir__(self):
+            return super().__dir__() + ["lazy_attribute"]
+
+    fake_module = FakeModule("fake_module")
+    safe_module = get_safe_module(fake_module, dangerous_patterns=[], authorized_imports=set())
+    assert not hasattr(safe_module, "lazy_attribute")
+    assert getattr(safe_module, "non_lazy_attribute") == "ok"
+
+
+class TestPrintContainer:
+    def test_initial_value(self):
+        pc = PrintContainer()
+        assert pc.value == ""
+
+    def test_append(self):
+        pc = PrintContainer()
+        pc.append("Hello")
+        assert pc.value == "Hello"
+
+    def test_iadd(self):
+        pc = PrintContainer()
+        pc += "World"
+        assert pc.value == "World"
+
+    def test_str(self):
+        pc = PrintContainer()
+        pc.append("Hello")
+        assert str(pc) == "Hello"
+
+    def test_repr(self):
+        pc = PrintContainer()
+        pc.append("Hello")
+        assert repr(pc) == "PrintContainer(Hello)"
+
+    def test_len(self):
+        pc = PrintContainer()
+        pc.append("Hello")
+        assert len(pc) == 5

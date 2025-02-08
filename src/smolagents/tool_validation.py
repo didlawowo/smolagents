@@ -1,10 +1,9 @@
 import ast
 import builtins
 import inspect
-import textwrap
 from typing import Set
 
-from .utils import BASE_BUILTIN_MODULES
+from .utils import BASE_BUILTIN_MODULES, get_source
 
 
 _BUILTIN_NAMES = set(vars(builtins))
@@ -26,6 +25,7 @@ class MethodChecker(ast.NodeVisitor):
         self.class_attributes = class_attributes
         self.errors = []
         self.check_imports = check_imports
+        self.typing_names = {"Any"}
 
     def visit_arguments(self, node):
         """Collect function arguments"""
@@ -98,6 +98,7 @@ class MethodChecker(ast.NodeVisitor):
                 or node.id in self.imports
                 or node.id in self.from_imports
                 or node.id in self.assigned_names
+                or node.id in self.typing_names
             ):
                 self.errors.append(f"Name '{node.id}' is undefined.")
 
@@ -132,7 +133,7 @@ def validate_tool_attributes(cls, check_imports: bool = True) -> None:
     """
     errors = []
 
-    source = textwrap.dedent(inspect.getsource(cls))
+    source = get_source(cls)
 
     tree = ast.parse(source)
 

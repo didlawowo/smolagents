@@ -49,17 +49,29 @@ contains the API docs for the underlying classes.
 
 [[autodoc]] PythonInterpreterTool
 
+### FinalAnswerTool
+
+[[autodoc]] FinalAnswerTool
+
+### UserInputTool
+
+[[autodoc]] UserInputTool
+
 ### DuckDuckGoSearchTool
 
 [[autodoc]] DuckDuckGoSearchTool
+
+### GoogleSearchTool
+
+[[autodoc]] GoogleSearchTool
 
 ### VisitWebpageTool
 
 [[autodoc]] VisitWebpageTool
 
-### UserInputTool
+### SpeechToTextTool
 
-[[autodoc]] UserInputTool
+[[autodoc]] SpeechToTextTool
 
 ## ToolCollection
 
@@ -84,12 +96,12 @@ These types have three specific purposes:
 
 ### AgentText
 
-[[autodoc]] smolagents.types.AgentText
+[[autodoc]] smolagents.agent_types.AgentText
 
 ### AgentImage
 
-[[autodoc]] smolagents.types.AgentImage
+[[autodoc]] smolagents.agent_types.AgentImage
 
 ### AgentAudio
 
-[[autodoc]] smolagents.types.AgentAudio
+[[autodoc]] smolagents.agent_types.AgentAudio
